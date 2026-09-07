@@ -1,11 +1,17 @@
 """Canvas iCalendar feed integration."""
 
+from datetime import date, datetime, time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 from icalendar import Calendar
 
-from config import CANVAS_ICAL_URL
+from config import CANVAS_ICAL_URL, TIMEZONE
+
+
+# uid prefixes that canvas uses for assignments
+ASSIGNMENT_UID_PREFIXES = ("event-assignment-", "event-assignment-override-")
 
 
 def fetch_calendar_feed() -> str:
@@ -69,10 +75,98 @@ def parse_calendar_feed(ics_data: str) -> list[dict[str, Any]]:
                 "uid": _get_text(component, "UID"),
                 "description": _get_text(component, "DESCRIPTION"),
                 "url": _get_text(component, "URL"),
+                "properties": sorted(str(key) for key in component.keys()),
             }
         )
 
     return events
+
+
+def is_assignment_event(event: dict[str, Any]) -> bool:
+    """Return whether a Canvas calendar event looks like an assignment."""
+    # use canvas uid structure instead of title words
+    uid = event.get("uid") or ""
+    return uid.startswith(ASSIGNMENT_UID_PREFIXES)
+
+
+def get_assignments(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize assignment events for later project phases."""
+    # build clean assignment dictionaries
+    assignments = []
+
+    for event in events:
+        if not is_assignment_event(event):
+            continue
+
+        assignments.append(
+            {
+                "title": event.get("summary") or "Untitled Canvas assignment",
+                "due_at": normalize_due_datetime(event.get("start")),
+                "uid": event.get("uid"),
+                "url": event.get("url"),
+                "description": event.get("description"),
+                "source_due_field": "DTSTART",
+            }
+        )
+
+    return assignments
+
+
+def normalize_due_datetime(value: Any) -> datetime | date | None:
+    """Normalize Canvas due values to the project timezone when possible."""
+    if value is None:
+        return None
+
+    project_timezone = ZoneInfo(TIMEZONE)
+
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            # canvas has not shown naive datetimes in this feed
+            return value.replace(tzinfo=project_timezone)
+        # convert aware datetimes into the project timezone
+        return value.astimezone(project_timezone)
+
+    if isinstance(value, date):
+        # keep date only values as dates
+        return value
+
+    return None
+
+
+def get_today() -> date:
+    """Return today's date in the project timezone."""
+    # today means the current phoenix calendar date
+    return datetime.now(ZoneInfo(TIMEZONE)).date()
+
+
+def get_assignments_due_today(assignments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return assignments due on today's project timezone date."""
+    # compare dates instead of formatted strings
+    today = get_today()
+
+    due_today = [
+        assignment
+        for assignment in assignments
+        if _due_date(assignment.get("due_at")) == today
+    ]
+
+    return sorted(due_today, key=_assignment_sort_key)
+
+
+def get_event_inspection(events: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
+    """Return a small sanitized sample of event structure."""
+    # omit event urls from inspection output
+    return [
+        {
+            "summary": event.get("summary"),
+            "uid": event.get("uid"),
+            "is_assignment": is_assignment_event(event),
+            "start": event.get("start"),
+            "end": event.get("end"),
+            "properties": event.get("properties"),
+        }
+        for event in events[:limit]
+    ]
 
 
 def _get_text(component: Any, field_name: str) -> str | None:
@@ -88,3 +182,25 @@ def _get_decoded(component: Any, field_name: str) -> Any:
     if field_name not in component:
         return None
     return component.decoded(field_name)
+
+
+def _due_date(value: Any) -> date | None:
+    # extract a comparable date value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return None
+
+
+def _assignment_sort_key(assignment: dict[str, Any]) -> tuple[int, time, str]:
+    # sort timed assignments before date only assignments
+    due_at = assignment.get("due_at")
+
+    if isinstance(due_at, datetime):
+        return (0, due_at.time(), assignment.get("title") or "")
+
+    if isinstance(due_at, date):
+        return (1, time.max, assignment.get("title") or "")
+
+    return (2, time.max, assignment.get("title") or "")
