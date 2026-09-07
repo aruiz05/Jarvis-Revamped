@@ -2,7 +2,7 @@
 
 Canvas Calendar Reminder will eventually synchronize Canvas assignments with Google Calendar and send a morning SMS reminder at 7:45 AM on days when assignments are due.
 
-The application currently uses a private Canvas iCalendar feed to process assignments and can connect to Google Calendar using OAuth 2.0 for a controlled Phase 4 connection test.
+The application currently uses a private Canvas iCalendar feed to process assignments, connects to Google Calendar using OAuth 2.0, and can create one controlled Canvas assignment event for manual inspection.
 
 ## Planned Technologies
 
@@ -14,7 +14,7 @@ The application currently uses a private Canvas iCalendar feed to process assign
 
 ## Current Development Status
 
-Phase 4: Google Calendar Connection
+Phase 5: Controlled Canvas to Google Calendar Sync
 
 ## Local Setup
 
@@ -57,6 +57,12 @@ Run the Google Calendar connection test:
 python main.py --calendar-test
 ```
 
+Run the controlled Canvas to Google Calendar sync test:
+
+```bash
+python main.py --sync-test
+```
+
 Expected output:
 
 ```text
@@ -79,6 +85,10 @@ The exact assignment counts and due items depend on your Canvas feed.
 
 The calendar test authenticates with Google Calendar, creates or reuses `token.json`, reads a small number of upcoming events from the primary calendar, creates one temporary Phase 4 test event, and deletes that exact event.
 
+The sync test retrieves Canvas assignments, selects one upcoming assignment, converts it to a Google Calendar event, stores the Canvas UID in Google private extended properties, and leaves the event on the calendar for manual inspection.
+
+Duplicate prevention is NOT implemented yet. Do not repeatedly run `--sync-test` unless you are willing to manually remove duplicate test events.
+
 To inspect a limited sample of Canvas event structure without printing the private feed URL, run:
 
 ```bash
@@ -87,9 +97,11 @@ python main.py --inspect
 
 ## Current Scope
 
-This phase retrieves and parses Canvas iCalendar feed data, identifies assignment events, normalizes assignment deadlines, lists assignments due today, and proves that Google Calendar authentication and basic event operations work.
+This phase retrieves and parses Canvas iCalendar feed data, identifies assignment events, normalizes assignment deadlines, lists assignments due today, proves that Google Calendar authentication works, and creates one controlled real Canvas assignment event.
 
-The project does not yet sync Canvas assignments into Google Calendar, detect duplicate Google Calendar assignment events, update changed Canvas assignments, send SMS reminders, run automatically at 7:45 AM, add scheduling, add a database, add a web server, or add a frontend.
+The project does not yet bulk sync Canvas assignments into Google Calendar, detect duplicate Google Calendar assignment events, update changed Canvas assignments, send SMS reminders, run automatically at 7:45 AM, add scheduling, add a database, add a web server, or add a frontend.
+
+Bulk synchronization begins only after duplicate prevention is implemented in the next phase.
 
 ## Assignment Identification
 
@@ -110,3 +122,17 @@ python main.py --calendar-test
 After successful authorization, the application creates `token.json` automatically and reuses it on later runs.
 
 Never commit `credentials.json` or `token.json`. Both files are ignored by Git.
+
+## Google Event Representation
+
+Timed Canvas assignments are represented as timed Google Calendar events:
+
+```text
+Google event start = Canvas deadline
+Google event duration = 15 minutes
+Timezone = America/Phoenix
+```
+
+Date only Canvas assignments are represented as all day Google Calendar events on the Canvas assignment date.
+
+The Canvas assignment UID is stored in Google Calendar private extended properties as `canvas_uid`, with `source` set to `canvas_calendar_reminder`. This metadata is for future duplicate detection and update logic, which is not implemented yet.

@@ -1,13 +1,18 @@
-from datetime import datetime
+from datetime import date, datetime
 import sys
 from zoneinfo import ZoneInfo
 
 from calendar_client import (
+    PRIMARY_CALENDAR_ID,
     TEST_EVENT_TITLE,
+    build_assignment_event,
+    create_assignment_event,
     create_test_event,
     delete_event,
     get_calendar_service,
     get_upcoming_events,
+    verify_assignment_event_deadline,
+    verify_assignment_event_metadata,
 )
 from config import TIMEZONE
 from canvas_client import (
@@ -24,9 +29,14 @@ def main() -> None:
     # check for optional inspection mode
     inspect_mode = "--inspect" in sys.argv[1:]
     calendar_test_mode = "--calendar-test" in sys.argv[1:]
+    sync_test_mode = "--sync-test" in sys.argv[1:]
 
     if calendar_test_mode:
         run_calendar_test()
+        return
+
+    if sync_test_mode:
+        run_sync_test()
         return
 
     print("Canvas Calendar Reminder")
@@ -118,6 +128,114 @@ def run_calendar_test() -> None:
             print(f"Title: {TEST_EVENT_TITLE}")
 
 
+def run_sync_test() -> None:
+    print("Canvas Calendar Reminder")
+    print("Phase 5 Canvas to Google Calendar Sync Test")
+    print()
+    print("Loading Canvas assignments...")
+
+    try:
+        ics_data = fetch_calendar_feed()
+        events = parse_calendar_feed(ics_data)
+        assignments = get_assignments(events)
+        selected_assignment = select_sync_test_assignment(assignments)
+    except RuntimeError as error:
+        print(error)
+        return
+
+    print(f"Assignments identified: {len(assignments)}")
+    print()
+
+    if selected_assignment is None:
+        print("No upcoming Canvas assignment with a usable due date was found.")
+        print("No Google Calendar event was created.")
+        return
+
+    print("Selected upcoming assignment:")
+    print()
+    print(f"Title: {selected_assignment.get('title')}")
+    print(f"Due: {_format_assignment_due(selected_assignment)}")
+    print(f"UID: {_format_value(selected_assignment.get('uid'))}")
+    print()
+    print("WARNING:")
+    print("Duplicate prevention is not implemented yet.")
+    print("Running this command again may create another copy of this event.")
+    print()
+    print("Authenticating with Google...")
+
+    try:
+        service = get_calendar_service()
+        print("Google Calendar connection successful.")
+        print()
+        print("Creating assignment event...")
+        print()
+
+        event_body = build_assignment_event(selected_assignment)
+        created_event = create_assignment_event(service, selected_assignment)
+
+        metadata_verified = verify_assignment_event_metadata(
+            service,
+            created_event,
+            selected_assignment,
+        )
+        deadline_verified = verify_assignment_event_deadline(
+            created_event,
+            selected_assignment,
+        )
+    except RuntimeError as error:
+        print(error)
+        return
+
+    print("Google Calendar assignment event created successfully.")
+    print()
+    print(f"Title: {created_event.get('summary')}")
+    print(f"Start: {_format_google_start(created_event)}")
+    print(f"Calendar: {PRIMARY_CALENDAR_ID}")
+    print(f"Event type: {_event_body_type(event_body)}")
+    print()
+
+    if metadata_verified:
+        print("Canvas UID metadata stored successfully.")
+    else:
+        print("Canvas UID metadata verification failed.")
+
+    if deadline_verified:
+        print("Deadline verification passed.")
+    else:
+        print("Deadline verification failed.")
+
+    print()
+    print("The Phase 5 assignment event was left on your Google Calendar for manual inspection.")
+
+
+def select_sync_test_assignment(assignments: list[dict[str, object]]) -> dict[str, object] | None:
+    # select one upcoming assignment for the sync test
+    timed_assignments = []
+    date_only_assignments = []
+    now = datetime.now(ZoneInfo(TIMEZONE))
+    today = now.date()
+
+    for assignment in assignments:
+        due_at = assignment.get("due_at")
+
+        if isinstance(due_at, datetime):
+            normalized_due = due_at.astimezone(ZoneInfo(TIMEZONE))
+            if normalized_due > now:
+                timed_assignments.append(assignment)
+            continue
+
+        if isinstance(due_at, date) and due_at >= today:
+            date_only_assignments.append(assignment)
+
+    if timed_assignments:
+        return min(timed_assignments, key=lambda assignment: assignment["due_at"])
+
+    if date_only_assignments:
+        return min(date_only_assignments, key=lambda assignment: assignment["due_at"])
+
+    return None
+
+
 def _format_value(value: object) -> str:
     # show missing fields clearly
     if value is None:
@@ -160,6 +278,32 @@ def _format_google_start(event: dict[str, object]) -> str:
         return str(raw_value)
 
     return start_time.astimezone(ZoneInfo(TIMEZONE)).strftime("%B %-d, %Y at %-I:%M %p")
+
+
+def _format_assignment_due(assignment: dict[str, object]) -> str:
+    # format the selected canvas due value
+    due_at = assignment.get("due_at")
+
+    if isinstance(due_at, datetime):
+        return due_at.astimezone(ZoneInfo(TIMEZONE)).strftime("%B %-d, %Y at %-I:%M %p")
+
+    if isinstance(due_at, date):
+        return due_at.strftime("%B %-d, %Y")
+
+    return "Not provided"
+
+
+def _event_body_type(event_body: dict[str, object]) -> str:
+    # report whether google received a timed or all day event
+    start = event_body.get("start")
+
+    if isinstance(start, dict) and "dateTime" in start:
+        return "timed"
+
+    if isinstance(start, dict) and "date" in start:
+        return "all day"
+
+    return "unknown"
 
 
 def _format_date(value: object) -> str:
