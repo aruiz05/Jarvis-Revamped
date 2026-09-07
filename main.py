@@ -6,11 +6,11 @@ from calendar_client import (
     PRIMARY_CALENDAR_ID,
     TEST_EVENT_TITLE,
     build_assignment_event,
-    create_assignment_event,
     create_test_event,
     delete_event,
     get_calendar_service,
     get_upcoming_events,
+    sync_assignment_event,
     verify_assignment_event_deadline,
     verify_assignment_event_metadata,
 )
@@ -130,7 +130,7 @@ def run_calendar_test() -> None:
 
 def run_sync_test() -> None:
     print("Canvas Calendar Reminder")
-    print("Phase 5 Canvas to Google Calendar Sync Test")
+    print("Phase 6 Canvas to Google Calendar Sync Test")
     print()
     print("Loading Canvas assignments...")
 
@@ -157,9 +157,8 @@ def run_sync_test() -> None:
     print(f"Due: {_format_assignment_due(selected_assignment)}")
     print(f"UID: {_format_value(selected_assignment.get('uid'))}")
     print()
-    print("WARNING:")
-    print("Duplicate prevention is not implemented yet.")
-    print("Running this command again may create another copy of this event.")
+    print("Duplicate prevention is enabled for this single assignment test.")
+    print("The Canvas UID will be used to find an existing Google Calendar event.")
     print()
     print("Authenticating with Google...")
 
@@ -167,31 +166,40 @@ def run_sync_test() -> None:
         service = get_calendar_service()
         print("Google Calendar connection successful.")
         print()
-        print("Creating assignment event...")
+        print("Searching for an existing Google Calendar event...")
         print()
 
         event_body = build_assignment_event(selected_assignment)
-        created_event = create_assignment_event(service, selected_assignment)
+        sync_result = sync_assignment_event(service, selected_assignment)
+        synced_event = sync_result["event"]
+        sync_action = sync_result["action"]
 
         metadata_verified = verify_assignment_event_metadata(
             service,
-            created_event,
+            synced_event,
             selected_assignment,
         )
         deadline_verified = verify_assignment_event_deadline(
-            created_event,
+            synced_event,
             selected_assignment,
         )
     except RuntimeError as error:
         print(error)
         return
 
-    print("Google Calendar assignment event created successfully.")
+    if sync_action == "created":
+        print("Google Calendar assignment event created successfully.")
+    elif sync_action == "updated":
+        print("Existing Google Calendar assignment event updated successfully.")
+    else:
+        print("Existing Google Calendar assignment event already matches Canvas.")
+
     print()
-    print(f"Title: {created_event.get('summary')}")
-    print(f"Start: {_format_google_start(created_event)}")
+    print(f"Title: {synced_event.get('summary')}")
+    print(f"Start: {_format_google_start(synced_event)}")
     print(f"Calendar: {PRIMARY_CALENDAR_ID}")
     print(f"Event type: {_event_body_type(event_body)}")
+    print(f"Sync action: {sync_action}")
     print()
 
     if metadata_verified:
@@ -205,7 +213,7 @@ def run_sync_test() -> None:
         print("Deadline verification failed.")
 
     print()
-    print("The Phase 5 assignment event was left on your Google Calendar for manual inspection.")
+    print("The assignment event was left on your Google Calendar for manual inspection.")
 
 
 def select_sync_test_assignment(assignments: list[dict[str, object]]) -> dict[str, object] | None:

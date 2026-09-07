@@ -202,6 +202,100 @@ def create_assignment_event(service: Any, assignment: dict[str, Any]) -> dict[st
     return event
 
 
+def find_event_by_canvas_uid(service: Any, canvas_uid: str) -> dict[str, Any] | None:
+    # search google using private canvas metadata
+    try:
+        result = (
+            service.events()
+            .list(
+                calendarId=PRIMARY_CALENDAR_ID,
+                privateExtendedProperty=[
+                    f"canvas_uid={canvas_uid}",
+                    f"source={SYNC_SOURCE}",
+                ],
+                maxResults=10,
+                singleEvents=True,
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        raise RuntimeError(f"Google Calendar request failed with HTTP status {_http_status(exc)}.") from exc
+    except Exception as exc:
+        raise RuntimeError("Unable to search Google Calendar for the Canvas assignment event.") from exc
+
+    matches = result.get("items", [])
+
+    if not matches:
+        return None
+
+    if len(matches) > 1:
+        raise RuntimeError(
+            "Multiple Google Calendar events were found for the same Canvas UID.\n"
+            "Manual cleanup may be required.\n"
+            "No event was created or updated."
+        )
+
+    return matches[0]
+
+
+def update_assignment_event(
+    service: Any,
+    event_id: str,
+    assignment: dict[str, Any],
+) -> dict[str, Any]:
+    # update one existing canvas assignment event
+    event_body = build_assignment_event(assignment)
+
+    try:
+        return (
+            service.events()
+            .patch(calendarId=PRIMARY_CALENDAR_ID, eventId=event_id, body=event_body)
+            .execute()
+        )
+    except HttpError as exc:
+        raise RuntimeError(f"Google Calendar request failed with HTTP status {_http_status(exc)}.") from exc
+    except Exception as exc:
+        raise RuntimeError("Unable to update the Google Calendar assignment event.") from exc
+
+
+def sync_assignment_event(service: Any, assignment: dict[str, Any]) -> dict[str, Any]:
+    # create update or keep one assignment event
+    canvas_uid = assignment.get("uid")
+
+    if not canvas_uid:
+        raise RuntimeError("Selected Canvas assignment does not have a usable UID.")
+
+    existing_event = find_event_by_canvas_uid(service, str(canvas_uid))
+
+    if existing_event is None:
+        created_event = create_assignment_event(service, assignment)
+        return {"action": "created", "event": created_event}
+
+    if assignment_event_needs_update(existing_event, assignment):
+        updated_event = update_assignment_event(service, existing_event["id"], assignment)
+        return {"action": "updated", "event": updated_event}
+
+    return {"action": "unchanged", "event": existing_event}
+
+
+def assignment_event_needs_update(
+    event: dict[str, Any],
+    assignment: dict[str, Any],
+) -> bool:
+    # compare google event fields with canvas assignment fields
+    event_body = build_assignment_event(assignment)
+
+    return any(
+        [
+            event.get("summary") != event_body.get("summary"),
+            event.get("description") != event_body.get("description"),
+            not _event_start_matches(event, event_body),
+            not _event_end_matches(event, event_body),
+            not _metadata_matches(event, event_body),
+        ]
+    )
+
+
 def get_event(service: Any, event_id: str) -> dict[str, Any]:
     # fetch one google calendar event by id
     try:
@@ -331,3 +425,51 @@ def _private_metadata(event: dict[str, Any]) -> dict[str, str]:
         return {}
 
     return private_properties
+
+
+def _metadata_matches(event: dict[str, Any], event_body: dict[str, Any]) -> bool:
+    # compare private extended properties
+    return _private_metadata(event) == _private_metadata(event_body)
+
+
+def _event_start_matches(event: dict[str, Any], event_body: dict[str, Any]) -> bool:
+    # compare google event start values
+    return _event_time_matches(event.get("start"), event_body.get("start"))
+
+
+def _event_end_matches(event: dict[str, Any], event_body: dict[str, Any]) -> bool:
+    # compare google event end values
+    return _event_time_matches(event.get("end"), event_body.get("end"))
+
+
+def _event_time_matches(actual: Any, expected: Any) -> bool:
+    # compare timed and all day values safely
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+
+    if "date" in expected:
+        return actual.get("date") == expected.get("date")
+
+    if "dateTime" not in expected:
+        return False
+
+    actual_datetime = _parse_google_datetime(actual.get("dateTime"))
+    expected_datetime = _parse_google_datetime(expected.get("dateTime"))
+
+    if actual_datetime is None or expected_datetime is None:
+        return False
+
+    return actual_datetime == expected_datetime
+
+
+def _parse_google_datetime(value: Any) -> datetime | None:
+    # parse google datetimes into the project timezone
+    if not value:
+        return None
+
+    try:
+        parsed_datetime = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+    return _as_project_datetime(parsed_datetime)
