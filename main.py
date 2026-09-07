@@ -17,9 +17,11 @@ from calendar_client import (
 from config import TIMEZONE
 from canvas_client import (
     fetch_calendar_feed,
+    get_assignment_skip_counts,
     get_assignments,
     get_assignments_due_today,
     get_event_inspection,
+    get_syncable_assignments,
     get_today,
     parse_calendar_feed,
 )
@@ -30,6 +32,8 @@ def main() -> None:
     inspect_mode = "--inspect" in sys.argv[1:]
     calendar_test_mode = "--calendar-test" in sys.argv[1:]
     sync_test_mode = "--sync-test" in sys.argv[1:]
+    sync_all_mode = "--sync-all" in sys.argv[1:]
+    dry_run_mode = "--dry-run" in sys.argv[1:]
 
     if calendar_test_mode:
         run_calendar_test()
@@ -37,6 +41,10 @@ def main() -> None:
 
     if sync_test_mode:
         run_sync_test()
+        return
+
+    if sync_all_mode:
+        run_sync_all(dry_run=dry_run_mode)
         return
 
     print("Canvas Calendar Reminder")
@@ -216,6 +224,79 @@ def run_sync_test() -> None:
     print("The assignment event was left on your Google Calendar for manual inspection.")
 
 
+def run_sync_all(dry_run: bool = False) -> None:
+    if dry_run:
+        print("Canvas Calendar Reminder")
+        print("Phase 7 Full Sync Dry Run")
+    else:
+        print("Canvas Calendar Reminder")
+        print("Phase 7 Full Canvas to Google Calendar Sync")
+    print()
+    print("Loading Canvas calendar...")
+    print()
+
+    try:
+        ics_data = fetch_calendar_feed()
+        events = parse_calendar_feed(ics_data)
+        assignments = get_assignments(events)
+    except RuntimeError as error:
+        print(error)
+        return
+
+    skip_counts = get_assignment_skip_counts(assignments)
+    syncable_assignments = get_syncable_assignments(assignments)
+
+    print(f"Canvas calendar items found: {len(events)}")
+    print(f"Assignments identified: {len(assignments)}")
+    print()
+    print(f"Past assignments skipped: {skip_counts['past_assignments']}")
+    print(f"Assignments without usable due dates skipped: {skip_counts['missing_due_dates']}")
+    print()
+    print(f"Assignments ready to sync: {len(syncable_assignments)}")
+    print()
+
+    if not syncable_assignments:
+        print("No current or upcoming Canvas assignments with usable due dates were found.")
+        return
+
+    _print_sync_preview(syncable_assignments)
+
+    if dry_run:
+        print()
+        print("DRY RUN ONLY")
+        print("No Google Calendar events were created or modified.")
+        return
+
+    print()
+    print(
+        f"This will synchronize {len(syncable_assignments)} Canvas assignments "
+        "with your primary Google Calendar."
+    )
+    answer = input("Continue? [y/N]: ").strip().lower()
+
+    if answer not in ("y", "yes"):
+        print("Synchronization cancelled.")
+        print("No Google Calendar changes were made.")
+        return
+
+    print()
+    print("Authenticating with Google...")
+
+    try:
+        service = get_calendar_service()
+    except RuntimeError as error:
+        print(error)
+        return
+
+    print("Google Calendar connection successful.")
+    print()
+    print("Synchronizing assignments...")
+    print()
+
+    summary = _sync_assignments(service, syncable_assignments)
+    _print_sync_summary(summary)
+
+
 def select_sync_test_assignment(assignments: list[dict[str, object]]) -> dict[str, object] | None:
     # select one upcoming assignment for the sync test
     timed_assignments = []
@@ -242,6 +323,84 @@ def select_sync_test_assignment(assignments: list[dict[str, object]]) -> dict[st
         return min(date_only_assignments, key=lambda assignment: assignment["due_at"])
 
     return None
+
+
+def _sync_assignments(
+    service: object,
+    assignments: list[dict[str, object]],
+) -> dict[str, int]:
+    # process assignments one at a time
+    summary = {
+        "processed": 0,
+        "created": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "conflicts": 0,
+        "failed": 0,
+    }
+    total = len(assignments)
+
+    for index, assignment in enumerate(assignments, start=1):
+        summary["processed"] += 1
+        title = assignment.get("title") or "Untitled Canvas assignment"
+
+        print(f"[{index}/{total}] {title}")
+
+        try:
+            result = sync_assignment_event(service, assignment)
+        except RuntimeError as error:
+            if "Multiple Google Calendar events" in str(error):
+                summary["conflicts"] += 1
+                print("       CONFLICT: multiple Google events found")
+                print(f"       UID: {_format_value(assignment.get('uid'))}")
+            else:
+                summary["failed"] += 1
+                print(f"       FAILED: {error}")
+            print()
+            continue
+
+        action = result.get("action")
+
+        if action == "created":
+            summary["created"] += 1
+            print("       Created")
+        elif action == "updated":
+            summary["updated"] += 1
+            print("       Updated")
+        else:
+            summary["unchanged"] += 1
+            print("       Unchanged")
+
+        print()
+
+    return summary
+
+
+def _print_sync_preview(assignments: list[dict[str, object]], limit: int = 10) -> None:
+    # show a small sync preview
+    print("Upcoming assignments:")
+    print()
+
+    for index, assignment in enumerate(assignments[:limit], start=1):
+        print(f"{index}. {assignment.get('title')}")
+        print(f"   Due: {_format_assignment_due(assignment)}")
+        print()
+
+    if len(assignments) > limit:
+        print(f"...and {len(assignments) - limit} more")
+
+
+def _print_sync_summary(summary: dict[str, int]) -> None:
+    # print final bulk sync counts
+    print("Synchronization complete.")
+    print()
+    print(f"Assignments processed: {summary['processed']}")
+    print()
+    print(f"Created:   {summary['created']}")
+    print(f"Updated:   {summary['updated']}")
+    print(f"Unchanged: {summary['unchanged']}")
+    print(f"Conflicts: {summary['conflicts']}")
+    print(f"Failed:    {summary['failed']}")
 
 
 def _format_value(value: object) -> str:

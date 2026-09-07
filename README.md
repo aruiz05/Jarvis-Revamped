@@ -2,7 +2,7 @@
 
 Canvas Calendar Reminder will eventually synchronize Canvas assignments with Google Calendar and send a morning SMS reminder at 7:45 AM on days when assignments are due.
 
-The application currently uses a private Canvas iCalendar feed to process assignments, connects to Google Calendar using OAuth 2.0, and can sync one controlled Canvas assignment without creating a duplicate.
+The application currently uses a private Canvas iCalendar feed to process assignments, connects to Google Calendar using OAuth 2.0, and can manually synchronize current and upcoming Canvas assignments to Google Calendar.
 
 ## Planned Technologies
 
@@ -14,7 +14,7 @@ The application currently uses a private Canvas iCalendar feed to process assign
 
 ## Current Development Status
 
-Phase 6: Duplicate Prevention and Existing Event Updates
+Phase 7: Full Canvas to Google Calendar Synchronization
 
 ## Local Setup
 
@@ -63,6 +63,18 @@ Run the controlled Canvas to Google Calendar sync test:
 python main.py --sync-test
 ```
 
+Preview a full manual synchronization without changing Google Calendar:
+
+```bash
+python main.py --sync-all --dry-run
+```
+
+Run a full manual synchronization:
+
+```bash
+python main.py --sync-all
+```
+
 Expected output:
 
 ```text
@@ -87,7 +99,7 @@ The calendar test authenticates with Google Calendar, creates or reuses `token.j
 
 The sync test retrieves Canvas assignments, selects one upcoming assignment, searches Google Calendar for an event with the same Canvas UID, and then creates updates or leaves that one event unchanged.
 
-Duplicate prevention is implemented only for this single assignment test. Bulk synchronization is not implemented yet.
+The full sync command retrieves Canvas assignments, filters to current and upcoming assignments, uses Canvas UID metadata to avoid duplicates, creates missing Google Calendar events, updates changed events, leaves matching events unchanged, reports duplicate conflicts, and prints synchronization statistics.
 
 To inspect a limited sample of Canvas event structure without printing the private feed URL, run:
 
@@ -97,11 +109,11 @@ python main.py --inspect
 
 ## Current Scope
 
-This phase retrieves and parses Canvas iCalendar feed data, identifies assignment events, normalizes assignment deadlines, lists assignments due today, proves that Google Calendar authentication works, and syncs one controlled real Canvas assignment with duplicate prevention.
+This phase retrieves and parses Canvas iCalendar feed data, identifies assignment events, normalizes assignment deadlines, lists assignments due today, proves that Google Calendar authentication works, and manually syncs current and upcoming Canvas assignments with duplicate prevention.
 
-The project does not yet bulk sync Canvas assignments into Google Calendar, delete stale Google Calendar events, send SMS reminders, run automatically at 7:45 AM, add scheduling, add a database, add a web server, or add a frontend.
+The project does not yet delete stale Google Calendar events, send SMS reminders, run automatically at 7:45 AM, add scheduling, add a database, add a web server, or add a frontend.
 
-Bulk synchronization begins only after the single assignment sync behavior is verified.
+SMS reminders are not implemented yet. Automatic scheduling is not implemented yet. Stale Google Calendar event deletion is not implemented yet.
 
 ## Assignment Identification
 
@@ -151,3 +163,23 @@ If no matching Google Calendar event exists, the test creates one event.
 If exactly one matching event exists, the test compares the title, description, start, end, and private metadata. If anything differs, it updates the existing event. If everything already matches, it does nothing.
 
 If multiple matching events exist, the test stops and reports that manual cleanup may be required. It does not delete duplicates automatically.
+
+## Full Synchronization
+
+Use dry run mode first:
+
+```bash
+python main.py --sync-all --dry-run
+```
+
+Dry run downloads Canvas data, identifies assignments, filters out past assignments and assignments without usable due dates, sorts the remaining assignments chronologically, and previews what would be synchronized. It does not authenticate with Google and does not create update or delete any Google Calendar events.
+
+Run full manual sync only after reviewing the dry run:
+
+```bash
+python main.py --sync-all
+```
+
+The command asks for confirmation before making Google Calendar changes. It processes assignments sequentially and reports counts for created, updated, unchanged, conflict, and failed assignments.
+
+Canvas UID metadata remains the identity for synchronized events. Event titles are never used to decide whether an assignment already exists.

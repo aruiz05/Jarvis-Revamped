@@ -153,6 +153,41 @@ def get_assignments_due_today(assignments: list[dict[str, Any]]) -> list[dict[st
     return sorted(due_today, key=_assignment_sort_key)
 
 
+def get_syncable_assignments(assignments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return current and future assignments with usable due dates."""
+    # keep only assignments ready for calendar sync
+    return sorted(
+        [
+            assignment
+            for assignment in assignments
+            if _is_syncable_assignment(assignment)
+        ],
+        key=_assignment_sort_key,
+    )
+
+
+def get_assignment_skip_counts(assignments: list[dict[str, Any]]) -> dict[str, int]:
+    """Return simple skip counts for bulk sync reporting."""
+    # count skipped assignments without changing the list
+    missing_due_dates = 0
+    past_assignments = 0
+
+    for assignment in assignments:
+        due_at = assignment.get("due_at")
+
+        if due_at is None:
+            missing_due_dates += 1
+            continue
+
+        if not _is_syncable_assignment(assignment):
+            past_assignments += 1
+
+    return {
+        "missing_due_dates": missing_due_dates,
+        "past_assignments": past_assignments,
+    }
+
+
 def get_event_inspection(events: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
     """Return a small sanitized sample of event structure."""
     # omit event urls from inspection output
@@ -193,14 +228,30 @@ def _due_date(value: Any) -> date | None:
     return None
 
 
-def _assignment_sort_key(assignment: dict[str, Any]) -> tuple[int, time, str]:
-    # sort timed assignments before date only assignments
+def _assignment_sort_key(assignment: dict[str, Any]) -> tuple[date, int, time, str]:
+    # sort by due date and time
     due_at = assignment.get("due_at")
 
     if isinstance(due_at, datetime):
-        return (0, due_at.time(), assignment.get("title") or "")
+        project_due = due_at.astimezone(ZoneInfo(TIMEZONE))
+        return (project_due.date(), 0, project_due.time(), assignment.get("title") or "")
 
     if isinstance(due_at, date):
-        return (1, time.max, assignment.get("title") or "")
+        return (due_at, 1, time.max, assignment.get("title") or "")
 
-    return (2, time.max, assignment.get("title") or "")
+    return (date.max, 2, time.max, assignment.get("title") or "")
+
+
+def _is_syncable_assignment(assignment: dict[str, Any]) -> bool:
+    # include only current or future assignments
+    due_at = assignment.get("due_at")
+    now = datetime.now(ZoneInfo(TIMEZONE))
+    today = now.date()
+
+    if isinstance(due_at, datetime):
+        return due_at.astimezone(ZoneInfo(TIMEZONE)) >= now
+
+    if isinstance(due_at, date):
+        return due_at >= today
+
+    return False
