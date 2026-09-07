@@ -25,6 +25,7 @@ from canvas_client import (
     get_today,
     parse_calendar_feed,
 )
+from sms_client import TEST_SMS_MESSAGE, build_due_today_message, send_sms, validate_sms_config
 
 
 def main() -> None:
@@ -34,9 +35,24 @@ def main() -> None:
     sync_test_mode = "--sync-test" in sys.argv[1:]
     sync_all_mode = "--sync-all" in sys.argv[1:]
     dry_run_mode = "--dry-run" in sys.argv[1:]
+    reminder_preview_mode = "--reminder-preview" in sys.argv[1:]
+    sms_test_mode = "--sms-test" in sys.argv[1:]
+    send_reminder_mode = "--send-reminder" in sys.argv[1:]
 
     if calendar_test_mode:
         run_calendar_test()
+        return
+
+    if sms_test_mode:
+        run_sms_test()
+        return
+
+    if reminder_preview_mode:
+        run_reminder_preview()
+        return
+
+    if send_reminder_mode:
+        run_send_reminder()
         return
 
     if sync_test_mode:
@@ -297,6 +313,89 @@ def run_sync_all(dry_run: bool = False) -> None:
     _print_sync_summary(summary)
 
 
+def run_reminder_preview() -> None:
+    print("Canvas Calendar Reminder")
+    print("Phase 8 Reminder Preview")
+    print()
+
+    due_today = _load_due_today_assignments()
+
+    if due_today is None:
+        return
+
+    print(f"Today: {_format_date(get_today())}")
+    print()
+    print(f"Assignments due today: {len(due_today)}")
+    print()
+
+    if not due_today:
+        print("Nothing is due today.")
+        print("No SMS was sent.")
+        return
+
+    message = build_due_today_message(due_today)
+
+    print("Message preview:")
+    print()
+    print(message)
+    print()
+    print("PREVIEW ONLY")
+    print("No SMS was sent.")
+
+
+def run_sms_test() -> None:
+    print("Canvas Calendar Reminder")
+    print("Phase 8 SMS Test")
+    print()
+    print("Validating Twilio configuration...")
+
+    try:
+        validate_sms_config()
+        print("Twilio configuration loaded.")
+        print()
+        print("Sending controlled SMS test message...")
+        result = send_sms(TEST_SMS_MESSAGE)
+    except RuntimeError as error:
+        print(error)
+        return
+
+    print("SMS submitted successfully.")
+    print(f"Twilio message status: {_format_value(result.get('status'))}")
+    print(f"Twilio message SID: {_short_sid(result.get('sid'))}")
+
+
+def run_send_reminder() -> None:
+    print("Canvas Calendar Reminder")
+    print("Phase 8 Send Reminder")
+    print()
+
+    due_today = _load_due_today_assignments()
+
+    if due_today is None:
+        return
+
+    print(f"Today: {_format_date(get_today())}")
+    print()
+    print(f"Assignments due today: {len(due_today)}")
+    print()
+
+    if not due_today:
+        print("Nothing is due today.")
+        print("No SMS was sent.")
+        return
+
+    message = build_due_today_message(due_today)
+
+    try:
+        result = send_sms(message)
+    except RuntimeError as error:
+        print(error)
+        return
+
+    print("SMS submitted successfully.")
+    print(f"Twilio message status: {_format_value(result.get('status'))}")
+
+
 def select_sync_test_assignment(assignments: list[dict[str, object]]) -> dict[str, object] | None:
     # select one upcoming assignment for the sync test
     timed_assignments = []
@@ -323,6 +422,21 @@ def select_sync_test_assignment(assignments: list[dict[str, object]]) -> dict[st
         return min(date_only_assignments, key=lambda assignment: assignment["due_at"])
 
     return None
+
+
+def _load_due_today_assignments() -> list[dict[str, object]] | None:
+    # load canvas assignments due today
+    print("Loading Canvas assignments...")
+
+    try:
+        ics_data = fetch_calendar_feed()
+        events = parse_calendar_feed(ics_data)
+        assignments = get_assignments(events)
+    except RuntimeError as error:
+        print(error)
+        return None
+
+    return get_assignments_due_today(assignments)
 
 
 def _sync_assignments(
@@ -374,6 +488,19 @@ def _sync_assignments(
         print()
 
     return summary
+
+
+def _short_sid(value: object) -> str:
+    # shorten twilio sid for display
+    if not value:
+        return "Not provided"
+
+    text = str(value)
+
+    if len(text) <= 8:
+        return text
+
+    return f"{text[:6]}...{text[-4:]}"
 
 
 def _print_sync_preview(assignments: list[dict[str, object]], limit: int = 10) -> None:

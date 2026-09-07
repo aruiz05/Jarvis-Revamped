@@ -2,7 +2,7 @@
 
 Canvas Calendar Reminder will eventually synchronize Canvas assignments with Google Calendar and send a morning SMS reminder at 7:45 AM on days when assignments are due.
 
-The application currently uses a private Canvas iCalendar feed to process assignments, connects to Google Calendar using OAuth 2.0, and can manually synchronize current and upcoming Canvas assignments to Google Calendar.
+The application currently uses a private Canvas iCalendar feed to process assignments, connects to Google Calendar using OAuth 2.0, manually synchronizes current and upcoming Canvas assignments, and can send manual SMS reminders through Twilio.
 
 ## Planned Technologies
 
@@ -14,7 +14,7 @@ The application currently uses a private Canvas iCalendar feed to process assign
 
 ## Current Development Status
 
-Phase 7: Full Canvas to Google Calendar Synchronization
+Phase 8: SMS Reminder Integration
 
 ## Local Setup
 
@@ -75,6 +75,24 @@ Run a full manual synchronization:
 python main.py --sync-all
 ```
 
+Preview the due today SMS reminder without sending:
+
+```bash
+python main.py --reminder-preview
+```
+
+Send a controlled Twilio test message:
+
+```bash
+python main.py --sms-test
+```
+
+Manually send the real due today reminder:
+
+```bash
+python main.py --send-reminder
+```
+
 Expected output:
 
 ```text
@@ -101,6 +119,8 @@ The sync test retrieves Canvas assignments, selects one upcoming assignment, sea
 
 The full sync command retrieves Canvas assignments, filters to current and upcoming assignments, uses Canvas UID metadata to avoid duplicates, creates missing Google Calendar events, updates changed events, leaves matching events unchanged, reports duplicate conflicts, and prints synchronization statistics.
 
+The reminder preview finds Canvas assignments due today and prints the SMS message without contacting Twilio. The SMS test sends exactly one controlled message. The send reminder command sends one message only when at least one assignment is due today.
+
 To inspect a limited sample of Canvas event structure without printing the private feed URL, run:
 
 ```bash
@@ -109,11 +129,13 @@ python main.py --inspect
 
 ## Current Scope
 
-This phase retrieves and parses Canvas iCalendar feed data, identifies assignment events, normalizes assignment deadlines, lists assignments due today, proves that Google Calendar authentication works, and manually syncs current and upcoming Canvas assignments with duplicate prevention.
+This phase retrieves and parses Canvas iCalendar feed data, identifies assignment events, normalizes assignment deadlines, lists assignments due today, manually syncs current and upcoming Canvas assignments with duplicate prevention, previews reminder messages, and sends manual Twilio SMS reminders.
 
-The project does not yet delete stale Google Calendar events, send SMS reminders, run automatically at 7:45 AM, add scheduling, add a database, add a web server, or add a frontend.
+The project does not yet delete stale Google Calendar events, run automatically at 7:45 AM, add scheduling, add a database, add a web server, or add a frontend.
 
-SMS reminders are not implemented yet. Automatic scheduling is not implemented yet. Stale Google Calendar event deletion is not implemented yet.
+Automatic 7:45 AM scheduling is NOT implemented yet. Stale Google Calendar event deletion is not implemented yet.
+
+Running `--send-reminder` manually more than once may send the reminder more than once.
 
 ## Assignment Identification
 
@@ -183,3 +205,36 @@ python main.py --sync-all
 The command asks for confirmation before making Google Calendar changes. It processes assignments sequentially and reports counts for created, updated, unchanged, conflict, and failed assignments.
 
 Canvas UID metadata remains the identity for synchronized events. Event titles are never used to decide whether an assignment already exists.
+
+## SMS Reminders
+
+The reminder message is built from Canvas assignments due today.
+
+Example format:
+
+```text
+Canvas reminder due today:
+
+* Assignment One - 4:30 PM
+* Assignment Two - Due today
+```
+
+Timed assignments use the normalized `America/Phoenix` time in 12 hour format. Date only assignments are shown as `Due today`.
+
+The preview command never contacts Twilio:
+
+```bash
+python main.py --reminder-preview
+```
+
+The transport test sends exactly one controlled SMS:
+
+```bash
+python main.py --sms-test
+```
+
+The manual reminder command sends exactly one SMS only if at least one assignment is due today:
+
+```bash
+python main.py --send-reminder
+```
