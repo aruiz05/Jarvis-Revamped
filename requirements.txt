@@ -1,5 +1,6 @@
 requests
 python-dotenv
+icalendar
 google-api-python-client
 google-auth
 google-auth-oauthlib
