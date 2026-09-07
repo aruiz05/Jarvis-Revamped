@@ -1,5 +1,15 @@
+from datetime import datetime
 import sys
+from zoneinfo import ZoneInfo
 
+from calendar_client import (
+    TEST_EVENT_TITLE,
+    create_test_event,
+    delete_event,
+    get_calendar_service,
+    get_upcoming_events,
+)
+from config import TIMEZONE
 from canvas_client import (
     fetch_calendar_feed,
     get_assignments,
@@ -13,6 +23,11 @@ from canvas_client import (
 def main() -> None:
     # check for optional inspection mode
     inspect_mode = "--inspect" in sys.argv[1:]
+    calendar_test_mode = "--calendar-test" in sys.argv[1:]
+
+    if calendar_test_mode:
+        run_calendar_test()
+        return
 
     print("Canvas Calendar Reminder")
     print("Loading Canvas calendar...")
@@ -64,11 +79,87 @@ def main() -> None:
         print()
 
 
+def run_calendar_test() -> None:
+    print("Canvas Calendar Reminder")
+    print("Google Calendar Phase 4 Test")
+    print()
+    print("Authenticating with Google...")
+
+    created_event_id = None
+
+    try:
+        service = get_calendar_service()
+        print("Google Calendar connection successful.")
+        print()
+
+        events = get_upcoming_events(service)
+        _print_upcoming_events(events)
+
+        print()
+        print("Creating temporary test event...")
+        created_event = create_test_event(service)
+        created_event_id = created_event["id"]
+        print("Google Calendar test event created successfully.")
+        print(f"Title: {created_event.get('summary')}")
+        print(f"Start: {_format_google_start(created_event)}")
+
+        print()
+        print("Deleting temporary test event...")
+        delete_event(service, created_event_id)
+        created_event_id = None
+        print("Google Calendar test event deleted successfully.")
+        print()
+        print("Phase 4 Google Calendar test passed.")
+    except RuntimeError as error:
+        print(error)
+        if created_event_id:
+            print()
+            print("A temporary Google Calendar test event may remain.")
+            print(f"Title: {TEST_EVENT_TITLE}")
+
+
 def _format_value(value: object) -> str:
     # show missing fields clearly
     if value is None:
         return "Not provided"
     return str(value)
+
+
+def _print_upcoming_events(events: list[dict[str, object]]) -> None:
+    # print a small safe event summary
+    print("Upcoming Google Calendar events:")
+    print()
+
+    if not events:
+        print("No upcoming Google Calendar events found.")
+        return
+
+    for index, event in enumerate(events, start=1):
+        print(f"{index}. {_format_value(event.get('summary'))}")
+        print(f"   Start: {_format_google_start(event)}")
+        print()
+
+
+def _format_google_start(event: dict[str, object]) -> str:
+    # format google event start values
+    start = event.get("start")
+
+    if not isinstance(start, dict):
+        return "Not provided"
+
+    raw_value = start.get("dateTime") or start.get("date")
+    if not raw_value:
+        return "Not provided"
+
+    if "T" not in str(raw_value):
+        return str(raw_value)
+
+    try:
+        start_time = datetime.fromisoformat(str(raw_value))
+    except ValueError:
+        return str(raw_value)
+
+    return start_time.astimezone(ZoneInfo(TIMEZONE)).strftime("%B %-d, %Y at %-I:%M %p")
 
 
 def _format_date(value: object) -> str:
