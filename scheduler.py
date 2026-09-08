@@ -13,7 +13,7 @@ from canvas_client import (
     get_syncable_assignments,
     parse_calendar_feed,
 )
-from config import TIMEZONE
+from config import APP_ENV, TIMEZONE, validate_required_configuration
 from reminder_client import build_daily_reminder_description
 
 
@@ -22,6 +22,7 @@ REMINDER_PREP_MINUTE = 30
 REMINDER_EVENT_HOUR = 7
 REMINDER_EVENT_MINUTE = 45
 HOURLY_SYNC_MINUTE = 5
+JOB_MISFIRE_GRACE_SECONDS = 900
 
 
 def configure_logging() -> None:
@@ -31,6 +32,17 @@ def configure_logging() -> None:
         format="[%(asctime)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
+
+
+def print_sync_summary(summary: dict[str, int]) -> None:
+    # print sync counts for cloud logs
+    logging.info("Sync complete:")
+    logging.info("Created: %s", summary["created"])
+    logging.info("Updated: %s", summary["updated"])
+    logging.info("Unchanged: %s", summary["unchanged"])
+    logging.info("Conflicts: %s", summary["conflicts"])
+    logging.info("Failed: %s", summary["failed"])
 
 
 def print_scheduler_info() -> None:
@@ -103,14 +115,7 @@ def run_calendar_sync_job() -> dict[str, int]:
             else:
                 summary["unchanged"] += 1
 
-        logging.info(
-            "Sync complete: %s created, %s updated, %s unchanged, %s conflicts, %s failed",
-            summary["created"],
-            summary["updated"],
-            summary["unchanged"],
-            summary["conflicts"],
-            summary["failed"],
-        )
+        print_sync_summary(summary)
     except RuntimeError as error:
         summary["failed"] += 1
         logging.error("Canvas synchronization failed: %s", error)
@@ -182,6 +187,9 @@ def create_scheduler() -> BlockingScheduler:
         CronTrigger(minute=HOURLY_SYNC_MINUTE, timezone=timezone),
         id="canvas_assignment_sync",
         name="Canvas assignment sync",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=JOB_MISFIRE_GRACE_SECONDS,
     )
     scheduler.add_job(
         run_daily_reminder_job,
@@ -190,8 +198,11 @@ def create_scheduler() -> BlockingScheduler:
             minute=REMINDER_PREP_MINUTE,
             timezone=timezone,
         ),
-        id="daily_reminder_preparation",
+        id="daily_due_reminder",
         name="Daily reminder preparation",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=JOB_MISFIRE_GRACE_SECONDS,
     )
 
     return scheduler
@@ -200,9 +211,20 @@ def create_scheduler() -> BlockingScheduler:
 def start_scheduler() -> None:
     # start the local blocking scheduler
     configure_logging()
+    logging.info("Starting Canvas Calendar Reminder")
+    logging.info("Environment: %s", APP_ENV)
+    logging.info("Timezone: %s", TIMEZONE)
+
+    try:
+        validate_required_configuration()
+    except RuntimeError as error:
+        logging.error("Configuration error: %s", error)
+        return
 
     print("Canvas Calendar Reminder")
     print("Automatic Scheduler")
+    print()
+    print(f"Environment: {APP_ENV}")
     print()
     print(f"Timezone: {TIMEZONE}")
     print()

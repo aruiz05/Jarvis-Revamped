@@ -1,5 +1,5 @@
 from datetime import date, datetime, timedelta
-from pathlib import Path
+import logging
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -11,12 +11,17 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from config import TIMEZONE
+from config import (
+    ALLOW_INTERACTIVE_GOOGLE_AUTH,
+    GOOGLE_CREDENTIALS_PATH,
+    GOOGLE_TOKEN_PATH,
+    TIMEZONE,
+)
 
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
-CREDENTIALS_FILE = Path("credentials.json")
-TOKEN_FILE = Path("token.json")
+CREDENTIALS_FILE = GOOGLE_CREDENTIALS_PATH
+TOKEN_FILE = GOOGLE_TOKEN_PATH
 TEST_EVENT_TITLE = "Canvas Calendar Reminder - Phase 4 Test"
 NOTIFICATION_TEST_TITLE = "Canvas Calendar Reminder Notification Test"
 PRIMARY_CALENDAR_ID = "primary"
@@ -25,8 +30,11 @@ DAILY_REMINDER_EVENT_KIND = "daily_due_summary"
 NOTIFICATION_TEST_EVENT_KIND = "notification_test"
 
 
-def get_google_credentials() -> Credentials:
+def get_google_credentials(allow_interactive: bool | None = None) -> Credentials:
     # load saved google credentials when available
+    if allow_interactive is None:
+        allow_interactive = ALLOW_INTERACTIVE_GOOGLE_AUTH
+
     credentials = None
 
     if TOKEN_FILE.exists():
@@ -59,6 +67,12 @@ def get_google_credentials() -> Credentials:
         _save_credentials(credentials)
         return credentials
 
+    if not allow_interactive:
+        raise RuntimeError(
+            "Google OAuth token is unavailable.\n"
+            "Authorize locally and configure the deployed token file."
+        )
+
     if not CREDENTIALS_FILE.exists():
         raise RuntimeError(
             "Google OAuth credentials were not found.\n"
@@ -80,9 +94,9 @@ def get_google_credentials() -> Credentials:
     return credentials
 
 
-def get_calendar_service() -> Any:
+def get_calendar_service(allow_interactive: bool | None = None) -> Any:
     # create the google calendar api client
-    credentials = get_google_credentials()
+    credentials = get_google_credentials(allow_interactive=allow_interactive)
     return build("calendar", "v3", credentials=credentials, cache_discovery=False)
 
 
@@ -544,7 +558,10 @@ def delete_event(service: Any, event_id: str) -> None:
 
 def _save_credentials(credentials: Credentials) -> None:
     # save tokens locally without printing them
-    TOKEN_FILE.write_text(credentials.to_json(), encoding="utf-8")
+    try:
+        TOKEN_FILE.write_text(credentials.to_json(), encoding="utf-8")
+    except OSError:
+        logging.warning("Google token refresh succeeded but the token file could not be updated")
 
 
 def _http_status(error: HttpError) -> int | str:

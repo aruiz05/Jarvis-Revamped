@@ -29,6 +29,7 @@ from canvas_client import (
     get_today,
     parse_calendar_feed,
 )
+from deployment_check import run_deployment_check
 from reminder_client import DAILY_REMINDER_TITLE, build_daily_reminder_description
 from scheduler import (
     print_scheduler_info,
@@ -54,6 +55,7 @@ def main() -> None:
         "--run-sync-job",
         "--run-reminder-job",
         "--notification-test",
+        "--deployment-check",
     }
     unknown_options = [option for option in sys.argv[1:] if option not in known_options]
 
@@ -75,6 +77,7 @@ def main() -> None:
     run_sync_job_mode = "--run-sync-job" in sys.argv[1:]
     run_reminder_job_mode = "--run-reminder-job" in sys.argv[1:]
     notification_test_mode = "--notification-test" in sys.argv[1:]
+    deployment_check_mode = "--deployment-check" in sys.argv[1:]
 
     if calendar_test_mode:
         run_calendar_test()
@@ -94,6 +97,10 @@ def main() -> None:
 
     if notification_test_mode:
         run_notification_test()
+        return
+
+    if deployment_check_mode:
+        run_deployment_check()
         return
 
     if scheduler_mode:

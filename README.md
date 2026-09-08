@@ -2,7 +2,7 @@
 
 Canvas Calendar Reminder synchronizes Canvas assignments with Google Calendar and creates a daily 7:45 AM Google Calendar reminder summarizing assignments due that day.
 
-The application currently uses a private Canvas iCalendar feed to process assignments, connects to Google Calendar using OAuth 2.0, manually synchronizes current and upcoming Canvas assignments, creates a daily Google Calendar reminder event for assignments due today, and can run those jobs on a local schedule while Python is running.
+The application currently uses a private Canvas iCalendar feed to process assignments, connects to Google Calendar using OAuth 2.0, manually synchronizes current and upcoming Canvas assignments, creates a daily Google Calendar reminder event for assignments due today, can run those jobs on a local schedule while Python is running, and is configured for a Render Background Worker deployment.
 
 ## Planned Technologies
 
@@ -10,10 +10,14 @@ The application currently uses a private Canvas iCalendar feed to process assign
 - Canvas iCalendar feed
 - Google Calendar API
 - python-dotenv
+- APScheduler
+- Render Background Worker
 
 ## Current Development Status
 
-Phase 9: Local Automatic Scheduling
+Phase 10: Always-On Cloud Deployment
+
+Phase 10 code and configuration are complete. Cloud worker deployment is pending manual Render setup.
 
 ## Local Setup
 
@@ -40,6 +44,11 @@ Edit `.env` with your private Canvas calendar feed URL:
 
 ```env
 CANVAS_ICAL_URL=
+TIMEZONE=America/Phoenix
+APP_ENV=development
+GOOGLE_CREDENTIALS_PATH=credentials.json
+GOOGLE_TOKEN_PATH=token.json
+ALLOW_INTERACTIVE_GOOGLE_AUTH=true
 ```
 
 The iCal URL should come from your own Canvas Calendar Feed settings. Store it only in `.env` and never commit it.
@@ -116,6 +125,12 @@ Create one notification test event a few minutes in the future:
 python main.py --notification-test
 ```
 
+Run a read only deployment readiness check:
+
+```bash
+python main.py --deployment-check
+```
+
 Expected output:
 
 ```text
@@ -154,11 +169,9 @@ python main.py --inspect
 
 This phase retrieves and parses Canvas iCalendar feed data, identifies assignment events, normalizes assignment deadlines, lists assignments due today, manually syncs current and upcoming Canvas assignments with duplicate prevention, previews daily reminder events, and creates duplicate safe Google Calendar reminder events.
 
-The project does not yet delete stale Google Calendar events, add a database, add a web server, or add a frontend.
+The project does not delete stale Google Calendar events, add a database, add a web server, or add a frontend.
 
-Cloud deployment is not implemented yet. Stale Google Calendar event deletion is not implemented yet.
-
-The scheduler must remain running for automatic jobs to execute. Closing the terminal, stopping Python, putting the computer into a state where the process cannot run, or shutting down the computer will stop local automation.
+When run locally, the scheduler must remain running for automatic jobs to execute. Closing the terminal, stopping Python, putting the computer into a state where the process cannot run, or shutting down the computer will stop local automation. The Render worker deployment moves that long running process off the local computer.
 
 ## Assignment Identification
 
@@ -179,6 +192,34 @@ python main.py --calendar-test
 After successful authorization, the application creates `token.json` automatically and reuses it on later runs.
 
 Never commit `credentials.json` or `token.json`. Both files are ignored by Git.
+
+Local development uses these default paths:
+
+```env
+GOOGLE_CREDENTIALS_PATH=credentials.json
+GOOGLE_TOKEN_PATH=token.json
+ALLOW_INTERACTIVE_GOOGLE_AUTH=true
+```
+
+Production should use secret file paths configured by the host:
+
+```env
+GOOGLE_CREDENTIALS_PATH=<secret-file path>
+GOOGLE_TOKEN_PATH=<secret-file path>
+ALLOW_INTERACTIVE_GOOGLE_AUTH=false
+```
+
+Authorize Google OAuth locally first. The workflow is:
+
+```text
+credentials.json
+run local Google auth
+browser authorization
+token.json generated
+deploy credentials.json and token.json securely as secret files
+```
+
+The deployed worker does not attempt an interactive browser OAuth flow. The deployed `token.json` must include the Google refresh token created by local authorization so the worker can refresh expired access tokens after restarts.
 
 ## Google Event Representation
 
@@ -312,4 +353,77 @@ When the scheduler starts, it runs one immediate assignment synchronization so G
 
 If the scheduler starts before 7:45 AM, it performs startup recovery for today's daily reminder. If it starts after 7:45 AM, it skips recovery because the notification window has already passed.
 
-The scheduler is local only. It is not deployed to a cloud host.
+The same scheduler command is used by the Render worker:
+
+```bash
+python main.py --scheduler
+```
+
+Use exactly one worker instance for this personal automation. Running multiple worker replicas could cause the same scheduled job to execute more than once, although event level duplicate prevention reduces some risk.
+
+## Deployment
+
+The repository includes:
+
+```text
+.python-version
+render.yaml
+```
+
+`.python-version` pins deployment to Python 3.12. Render can choose the current supported Python 3.12 patch release.
+
+`render.yaml` defines one Python background worker with:
+
+```text
+type: worker
+runtime: python
+build command: pip install -r requirements.txt
+start command: python main.py --scheduler
+```
+
+Do not put secret values in `render.yaml`, README, source code, or Git.
+
+Manual Render setup:
+
+1. Push the repository to GitHub.
+2. Create a Render Background Worker.
+3. Connect the repository.
+4. Use the Python runtime.
+5. Use build command `pip install -r requirements.txt`.
+6. Use start command `python main.py --scheduler`.
+7. Configure `APP_ENV=production`.
+8. Configure `TIMEZONE=America/Phoenix`.
+9. Configure `CANVAS_ICAL_URL` as a secret environment variable.
+10. Add `credentials.json` as a Render secret file.
+11. Add the locally authorized `token.json` as a Render secret file.
+12. Set `GOOGLE_CREDENTIALS_PATH` to the Render path for the credentials secret file.
+13. Set `GOOGLE_TOKEN_PATH` to the Render path for the token secret file.
+14. Configure `ALLOW_INTERACTIVE_GOOGLE_AUTH=false`.
+15. Deploy exactly one worker instance.
+16. Inspect logs and confirm the initial sync succeeds.
+
+Run this before deploying and after configuring production variables:
+
+```bash
+python main.py --deployment-check
+```
+
+Expected startup logs include:
+
+```text
+Starting Canvas Calendar Reminder
+Environment: production
+Timezone: America/Phoenix
+Running initial Canvas synchronization
+Sync complete
+Scheduler started
+```
+
+First production verification:
+
+1. Confirm the worker remains running.
+2. Confirm the next scheduled Canvas sync executes at the next `:05`.
+3. Confirm the 7:30 AM reminder preparation runs on the next relevant morning.
+4. Confirm the 7:45 AM Google Calendar phone notification appears when something is due.
+
+After deployment, the local Mac does not need to remain on. Render runs the scheduler process.

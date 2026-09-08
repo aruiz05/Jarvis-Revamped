@@ -1,0 +1,13 @@
+services:
+  - type: worker
+    name: canvas-calendar-reminder
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py --scheduler
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: TIMEZONE
+        value: America/Phoenix
+      - key: ALLOW_INTERACTIVE_GOOGLE_AUTH
+        value: "false"
