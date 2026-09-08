@@ -5,11 +5,13 @@ from zoneinfo import ZoneInfo
 from calendar_client import (
     PRIMARY_CALENDAR_ID,
     TEST_EVENT_TITLE,
+    build_daily_reminder_event,
     build_assignment_event,
     create_test_event,
     delete_event,
     get_calendar_service,
     get_upcoming_events,
+    sync_daily_reminder_event,
     sync_assignment_event,
     verify_assignment_event_deadline,
     verify_assignment_event_metadata,
@@ -25,10 +27,26 @@ from canvas_client import (
     get_today,
     parse_calendar_feed,
 )
-from sms_client import TEST_SMS_MESSAGE, build_due_today_message, send_sms, validate_sms_config
+from reminder_client import DAILY_REMINDER_TITLE, build_daily_reminder_description
 
 
 def main() -> None:
+    # reject unsupported command options
+    known_options = {
+        "--inspect",
+        "--calendar-test",
+        "--sync-test",
+        "--sync-all",
+        "--dry-run",
+        "--reminder-preview",
+        "--sync-daily-reminder",
+    }
+    unknown_options = [option for option in sys.argv[1:] if option not in known_options]
+
+    if unknown_options:
+        print(f"Unknown command option: {unknown_options[0]}")
+        return
+
     # check for optional inspection mode
     inspect_mode = "--inspect" in sys.argv[1:]
     calendar_test_mode = "--calendar-test" in sys.argv[1:]
@@ -36,23 +54,18 @@ def main() -> None:
     sync_all_mode = "--sync-all" in sys.argv[1:]
     dry_run_mode = "--dry-run" in sys.argv[1:]
     reminder_preview_mode = "--reminder-preview" in sys.argv[1:]
-    sms_test_mode = "--sms-test" in sys.argv[1:]
-    send_reminder_mode = "--send-reminder" in sys.argv[1:]
+    sync_daily_reminder_mode = "--sync-daily-reminder" in sys.argv[1:]
 
     if calendar_test_mode:
         run_calendar_test()
-        return
-
-    if sms_test_mode:
-        run_sms_test()
         return
 
     if reminder_preview_mode:
         run_reminder_preview()
         return
 
-    if send_reminder_mode:
-        run_send_reminder()
+    if sync_daily_reminder_mode:
+        run_sync_daily_reminder()
         return
 
     if sync_test_mode:
@@ -315,7 +328,7 @@ def run_sync_all(dry_run: bool = False) -> None:
 
 def run_reminder_preview() -> None:
     print("Canvas Calendar Reminder")
-    print("Phase 8 Reminder Preview")
+    print("Daily Reminder Preview")
     print()
 
     due_today = _load_due_today_assignments()
@@ -330,43 +343,30 @@ def run_reminder_preview() -> None:
 
     if not due_today:
         print("Nothing is due today.")
-        print("No SMS was sent.")
+        print("No reminder event is needed.")
         return
 
-    message = build_due_today_message(due_today)
+    reminder_date = get_today()
+    description = build_daily_reminder_description(due_today)
+    event_body = build_daily_reminder_event(reminder_date, description)
 
-    print("Message preview:")
+    print(f"Date: {_format_date(reminder_date)}")
+    print(f"Event time: 7:45 AM {TIMEZONE}")
     print()
-    print(message)
+    print("Title:")
+    print(DAILY_REMINDER_TITLE)
     print()
+    print("Description:")
+    print()
+    print(description)
     print("PREVIEW ONLY")
-    print("No SMS was sent.")
+    print("No Google Calendar event was created or modified.")
+    _ = event_body
 
 
-def run_sms_test() -> None:
+def run_sync_daily_reminder() -> None:
     print("Canvas Calendar Reminder")
-    print("Phase 8 SMS Test")
-    print()
-    print("Validating Twilio configuration...")
-
-    try:
-        validate_sms_config()
-        print("Twilio configuration loaded.")
-        print()
-        print("Sending controlled SMS test message...")
-        result = send_sms(TEST_SMS_MESSAGE)
-    except RuntimeError as error:
-        print(error)
-        return
-
-    print("SMS submitted successfully.")
-    print(f"Twilio message status: {_format_value(result.get('status'))}")
-    print(f"Twilio message SID: {_short_sid(result.get('sid'))}")
-
-
-def run_send_reminder() -> None:
-    print("Canvas Calendar Reminder")
-    print("Phase 8 Send Reminder")
+    print("Daily Reminder Sync")
     print()
 
     due_today = _load_due_today_assignments()
@@ -381,19 +381,38 @@ def run_send_reminder() -> None:
 
     if not due_today:
         print("Nothing is due today.")
-        print("No SMS was sent.")
+        print("No reminder event was created.")
         return
 
-    message = build_due_today_message(due_today)
+    reminder_date = get_today()
+    description = build_daily_reminder_description(due_today)
 
     try:
-        result = send_sms(message)
+        print("Authenticating with Google...")
+        service = get_calendar_service()
+        print("Google Calendar connection successful.")
+        print()
+        result = sync_daily_reminder_event(service, reminder_date, description)
     except RuntimeError as error:
         print(error)
         return
 
-    print("SMS submitted successfully.")
-    print(f"Twilio message status: {_format_value(result.get('status'))}")
+    action = result.get("action")
+
+    if action == "created":
+        print("Daily reminder event created.")
+    elif action == "updated":
+        print("Existing daily reminder event found.")
+        print("Assignment list changed.")
+        print("Daily reminder event updated.")
+    else:
+        print("Existing daily reminder event found.")
+        print("No changes detected.")
+        print("No update required.")
+
+    print(f"Title: {result['event'].get('summary')}")
+    print(f"Start: {_format_google_start(result['event'])}")
+    print(f"Calendar: {PRIMARY_CALENDAR_ID}")
 
 
 def select_sync_test_assignment(assignments: list[dict[str, object]]) -> dict[str, object] | None:
@@ -488,19 +507,6 @@ def _sync_assignments(
         print()
 
     return summary
-
-
-def _short_sid(value: object) -> str:
-    # shorten twilio sid for display
-    if not value:
-        return "Not provided"
-
-    text = str(value)
-
-    if len(text) <= 8:
-        return text
-
-    return f"{text[:6]}...{text[-4:]}"
 
 
 def _print_sync_preview(assignments: list[dict[str, object]], limit: int = 10) -> None:

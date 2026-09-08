@@ -20,6 +20,7 @@ TOKEN_FILE = Path("token.json")
 TEST_EVENT_TITLE = "Canvas Calendar Reminder - Phase 4 Test"
 PRIMARY_CALENDAR_ID = "primary"
 SYNC_SOURCE = "canvas_calendar_reminder"
+DAILY_REMINDER_EVENT_KIND = "daily_due_summary"
 
 
 def get_google_credentials() -> Credentials:
@@ -278,6 +279,126 @@ def sync_assignment_event(service: Any, assignment: dict[str, Any]) -> dict[str,
     return {"action": "unchanged", "event": existing_event}
 
 
+def build_daily_reminder_event(reminder_date: date, description: str) -> dict[str, Any]:
+    # build the daily google reminder event body
+    start_time = datetime.combine(reminder_date, datetime.min.time()).replace(
+        hour=7,
+        minute=45,
+        tzinfo=ZoneInfo(TIMEZONE),
+    )
+    end_time = start_time + timedelta(minutes=15)
+
+    return {
+        "summary": "Assignments Due Today",
+        "description": description,
+        "start": {
+            "dateTime": start_time.isoformat(),
+            "timeZone": TIMEZONE,
+        },
+        "end": {
+            "dateTime": end_time.isoformat(),
+            "timeZone": TIMEZONE,
+        },
+        "reminders": {
+            "useDefault": False,
+            "overrides": [
+                {
+                    "method": "popup",
+                    "minutes": 0,
+                }
+            ],
+        },
+        "extendedProperties": {
+            "private": {
+                "source": SYNC_SOURCE,
+                "event_kind": DAILY_REMINDER_EVENT_KIND,
+                "reminder_date": reminder_date.isoformat(),
+            }
+        },
+    }
+
+
+def find_daily_reminder_event(
+    service: Any,
+    reminder_date: date,
+) -> dict[str, Any] | None:
+    # search google using daily reminder metadata
+    try:
+        result = (
+            service.events()
+            .list(
+                calendarId=PRIMARY_CALENDAR_ID,
+                privateExtendedProperty=[
+                    f"source={SYNC_SOURCE}",
+                    f"event_kind={DAILY_REMINDER_EVENT_KIND}",
+                    f"reminder_date={reminder_date.isoformat()}",
+                ],
+                maxResults=10,
+                singleEvents=True,
+            )
+            .execute()
+        )
+    except HttpError as exc:
+        raise RuntimeError(f"Google Calendar request failed with HTTP status {_http_status(exc)}.") from exc
+    except Exception as exc:
+        raise RuntimeError("Unable to search Google Calendar for the daily reminder event.") from exc
+
+    matches = result.get("items", [])
+
+    if not matches:
+        return None
+
+    if len(matches) > 1:
+        raise RuntimeError(
+            "Multiple daily reminder events were found for this date.\n"
+            "Manual cleanup may be required.\n"
+            "No reminder event was created or updated."
+        )
+
+    return matches[0]
+
+
+def sync_daily_reminder_event(
+    service: Any,
+    reminder_date: date,
+    description: str,
+) -> dict[str, Any]:
+    # create update or keep one daily reminder event
+    expected_event = build_daily_reminder_event(reminder_date, description)
+    existing_event = find_daily_reminder_event(service, reminder_date)
+
+    if existing_event is None:
+        created_event = _create_daily_reminder_event(service, expected_event)
+        return {"action": "created", "event": created_event}
+
+    if daily_reminder_event_needs_update(existing_event, expected_event):
+        updated_event = _update_daily_reminder_event(
+            service,
+            existing_event["id"],
+            expected_event,
+        )
+        return {"action": "updated", "event": updated_event}
+
+    return {"action": "unchanged", "event": existing_event}
+
+
+def daily_reminder_event_needs_update(
+    event: dict[str, Any],
+    expected_event: dict[str, Any],
+) -> bool:
+    # compare daily reminder event fields
+    return any(
+        [
+            event.get("summary") != expected_event.get("summary"),
+            event.get("description") != expected_event.get("description"),
+            not _event_start_matches(event, expected_event),
+            not _event_end_matches(event, expected_event),
+            not _metadata_matches(event, expected_event),
+            not _reminders_match(event, expected_event),
+        ]
+    )
+
+
 def assignment_event_needs_update(
     event: dict[str, Any],
     assignment: dict[str, Any],
@@ -473,3 +594,48 @@ def _parse_google_datetime(value: Any) -> datetime | None:
         return None
 
     return _as_project_datetime(parsed_datetime)
+
+
+def _create_daily_reminder_event(
+    service: Any,
+    event_body: dict[str, Any],
+) -> dict[str, Any]:
+    # insert one daily reminder event
+    try:
+        event = (
+            service.events()
+            .insert(calendarId=PRIMARY_CALENDAR_ID, body=event_body)
+            .execute()
+        )
+    except HttpError as exc:
+        raise RuntimeError(f"Google Calendar request failed with HTTP status {_http_status(exc)}.") from exc
+    except Exception as exc:
+        raise RuntimeError("Unable to create the daily reminder event.") from exc
+
+    if not event.get("id"):
+        raise RuntimeError("Google Calendar did not return a daily reminder event id.")
+
+    return event
+
+
+def _update_daily_reminder_event(
+    service: Any,
+    event_id: str,
+    event_body: dict[str, Any],
+) -> dict[str, Any]:
+    # update one daily reminder event
+    try:
+        return (
+            service.events()
+            .patch(calendarId=PRIMARY_CALENDAR_ID, eventId=event_id, body=event_body)
+            .execute()
+        )
+    except HttpError as exc:
+        raise RuntimeError(f"Google Calendar request failed with HTTP status {_http_status(exc)}.") from exc
+    except Exception as exc:
+        raise RuntimeError("Unable to update the daily reminder event.") from exc
+
+
+def _reminders_match(event: dict[str, Any], expected_event: dict[str, Any]) -> bool:
+    # compare explicit reminder settings
+    return event.get("reminders") == expected_event.get("reminders")
