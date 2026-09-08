@@ -3,10 +3,12 @@ import sys
 from zoneinfo import ZoneInfo
 
 from calendar_client import (
+    NOTIFICATION_TEST_TITLE,
     PRIMARY_CALENDAR_ID,
     TEST_EVENT_TITLE,
     build_daily_reminder_event,
     build_assignment_event,
+    create_notification_test_event,
     create_test_event,
     delete_event,
     get_calendar_service,
@@ -28,6 +30,12 @@ from canvas_client import (
     parse_calendar_feed,
 )
 from reminder_client import DAILY_REMINDER_TITLE, build_daily_reminder_description
+from scheduler import (
+    print_scheduler_info,
+    run_calendar_sync_job,
+    run_daily_reminder_job,
+    start_scheduler,
+)
 
 
 def main() -> None:
@@ -36,10 +44,16 @@ def main() -> None:
         "--inspect",
         "--calendar-test",
         "--sync-test",
+        "--sync-update-test",
         "--sync-all",
         "--dry-run",
         "--reminder-preview",
         "--sync-daily-reminder",
+        "--scheduler",
+        "--scheduler-info",
+        "--run-sync-job",
+        "--run-reminder-job",
+        "--notification-test",
     }
     unknown_options = [option for option in sys.argv[1:] if option not in known_options]
 
@@ -51,13 +65,39 @@ def main() -> None:
     inspect_mode = "--inspect" in sys.argv[1:]
     calendar_test_mode = "--calendar-test" in sys.argv[1:]
     sync_test_mode = "--sync-test" in sys.argv[1:]
+    sync_update_test_mode = "--sync-update-test" in sys.argv[1:]
     sync_all_mode = "--sync-all" in sys.argv[1:]
     dry_run_mode = "--dry-run" in sys.argv[1:]
     reminder_preview_mode = "--reminder-preview" in sys.argv[1:]
     sync_daily_reminder_mode = "--sync-daily-reminder" in sys.argv[1:]
+    scheduler_mode = "--scheduler" in sys.argv[1:]
+    scheduler_info_mode = "--scheduler-info" in sys.argv[1:]
+    run_sync_job_mode = "--run-sync-job" in sys.argv[1:]
+    run_reminder_job_mode = "--run-reminder-job" in sys.argv[1:]
+    notification_test_mode = "--notification-test" in sys.argv[1:]
 
     if calendar_test_mode:
         run_calendar_test()
+        return
+
+    if scheduler_info_mode:
+        print_scheduler_info()
+        return
+
+    if run_sync_job_mode:
+        run_calendar_sync_job()
+        return
+
+    if run_reminder_job_mode:
+        run_daily_reminder_job()
+        return
+
+    if notification_test_mode:
+        run_notification_test()
+        return
+
+    if scheduler_mode:
+        start_scheduler()
         return
 
     if reminder_preview_mode:
@@ -68,7 +108,7 @@ def main() -> None:
         run_sync_daily_reminder()
         return
 
-    if sync_test_mode:
+    if sync_test_mode or sync_update_test_mode:
         run_sync_test()
         return
 
@@ -413,6 +453,31 @@ def run_sync_daily_reminder() -> None:
     print(f"Title: {result['event'].get('summary')}")
     print(f"Start: {_format_google_start(result['event'])}")
     print(f"Calendar: {PRIMARY_CALENDAR_ID}")
+
+
+def run_notification_test() -> None:
+    print("Canvas Calendar Reminder")
+    print("Notification Test")
+    print()
+    print("Authenticating with Google...")
+
+    try:
+        service = get_calendar_service()
+        print("Google Calendar connection successful.")
+        print()
+        print("Creating notification test event...")
+        event = create_notification_test_event(service)
+    except RuntimeError as error:
+        print(error)
+        return
+
+    print("Notification test event created.")
+    print(f"Title: {event.get('summary') or NOTIFICATION_TEST_TITLE}")
+    print(f"Start: {_format_google_start(event)}")
+    print("Popup reminder: at event start")
+    print()
+    print("The event was left on your calendar so the notification can fire.")
+    print("Check your phone for the Google Calendar notification.")
 
 
 def select_sync_test_assignment(assignments: list[dict[str, object]]) -> dict[str, object] | None:

@@ -18,9 +18,11 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 CREDENTIALS_FILE = Path("credentials.json")
 TOKEN_FILE = Path("token.json")
 TEST_EVENT_TITLE = "Canvas Calendar Reminder - Phase 4 Test"
+NOTIFICATION_TEST_TITLE = "Canvas Calendar Reminder Notification Test"
 PRIMARY_CALENDAR_ID = "primary"
 SYNC_SOURCE = "canvas_calendar_reminder"
 DAILY_REMINDER_EVENT_KIND = "daily_due_summary"
+NOTIFICATION_TEST_EVENT_KIND = "notification_test"
 
 
 def get_google_credentials() -> Credentials:
@@ -81,7 +83,7 @@ def get_google_credentials() -> Credentials:
 def get_calendar_service() -> Any:
     # create the google calendar api client
     credentials = get_google_credentials()
-    return build("calendar", "v3", credentials=credentials)
+    return build("calendar", "v3", credentials=credentials, cache_discovery=False)
 
 
 def get_upcoming_events(service: Any, limit: int = 5) -> list[dict[str, Any]]:
@@ -139,6 +141,56 @@ def create_test_event(service: Any) -> dict[str, Any]:
 
     if not event.get("id"):
         raise RuntimeError("Google Calendar did not return a test event id.")
+
+    return event
+
+
+def create_notification_test_event(service: Any) -> dict[str, Any]:
+    # create one notification test event
+    start_time = datetime.now(tz=ZoneInfo(TIMEZONE)) + timedelta(minutes=3)
+    end_time = start_time + timedelta(minutes=15)
+
+    event_body = {
+        "summary": NOTIFICATION_TEST_TITLE,
+        "description": "Temporary event for testing Google Calendar phone notifications.",
+        "start": {
+            "dateTime": start_time.isoformat(),
+            "timeZone": TIMEZONE,
+        },
+        "end": {
+            "dateTime": end_time.isoformat(),
+            "timeZone": TIMEZONE,
+        },
+        "reminders": {
+            "useDefault": False,
+            "overrides": [
+                {
+                    "method": "popup",
+                    "minutes": 0,
+                }
+            ],
+        },
+        "extendedProperties": {
+            "private": {
+                "source": SYNC_SOURCE,
+                "event_kind": NOTIFICATION_TEST_EVENT_KIND,
+            }
+        },
+    }
+
+    try:
+        event = (
+            service.events()
+            .insert(calendarId=PRIMARY_CALENDAR_ID, body=event_body)
+            .execute()
+        )
+    except HttpError as exc:
+        raise RuntimeError(f"Google Calendar request failed with HTTP status {_http_status(exc)}.") from exc
+    except Exception as exc:
+        raise RuntimeError("Unable to create the notification test event.") from exc
+
+    if not event.get("id"):
+        raise RuntimeError("Google Calendar did not return a notification test event id.")
 
     return event
 

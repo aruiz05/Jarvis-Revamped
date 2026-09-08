@@ -2,7 +2,7 @@
 
 Canvas Calendar Reminder synchronizes Canvas assignments with Google Calendar and creates a daily 7:45 AM Google Calendar reminder summarizing assignments due that day.
 
-The application currently uses a private Canvas iCalendar feed to process assignments, connects to Google Calendar using OAuth 2.0, manually synchronizes current and upcoming Canvas assignments, and can create a daily Google Calendar reminder event for assignments due today.
+The application currently uses a private Canvas iCalendar feed to process assignments, connects to Google Calendar using OAuth 2.0, manually synchronizes current and upcoming Canvas assignments, creates a daily Google Calendar reminder event for assignments due today, and can run those jobs on a local schedule while Python is running.
 
 ## Planned Technologies
 
@@ -13,7 +13,7 @@ The application currently uses a private Canvas iCalendar feed to process assign
 
 ## Current Development Status
 
-Architecture Updated: Google Calendar Daily Reminders
+Phase 9: Local Automatic Scheduling
 
 ## Local Setup
 
@@ -86,6 +86,36 @@ Manually create or update the due today Google Calendar reminder event:
 python main.py --sync-daily-reminder
 ```
 
+Show scheduler configuration:
+
+```bash
+python main.py --scheduler-info
+```
+
+Run one scheduled style assignment sync job:
+
+```bash
+python main.py --run-sync-job
+```
+
+Run one scheduled style daily reminder job:
+
+```bash
+python main.py --run-reminder-job
+```
+
+Start the local scheduler:
+
+```bash
+python main.py --scheduler
+```
+
+Create one notification test event a few minutes in the future:
+
+```bash
+python main.py --notification-test
+```
+
 Expected output:
 
 ```text
@@ -124,9 +154,11 @@ python main.py --inspect
 
 This phase retrieves and parses Canvas iCalendar feed data, identifies assignment events, normalizes assignment deadlines, lists assignments due today, manually syncs current and upcoming Canvas assignments with duplicate prevention, previews daily reminder events, and creates duplicate safe Google Calendar reminder events.
 
-The project does not yet delete stale Google Calendar events, run automatically at 7:45 AM, add scheduling, add a database, add a web server, or add a frontend.
+The project does not yet delete stale Google Calendar events, add a database, add a web server, or add a frontend.
 
-Automatic 7:45 AM scheduling is NOT implemented yet. Stale Google Calendar event deletion is not implemented yet.
+Cloud deployment is not implemented yet. Stale Google Calendar event deletion is not implemented yet.
+
+The scheduler must remain running for automatic jobs to execute. Closing the terminal, stopping Python, putting the computer into a state where the process cannot run, or shutting down the computer will stop local automation.
 
 ## Assignment Identification
 
@@ -247,3 +279,37 @@ reminder_date=yyyy-mm-dd
 The event title is not used as the identity.
 
 For notifications to appear on a phone, Google Calendar must be installed and configured on the phone, the same Google account or calendar must be active, Calendar notifications must be enabled, and operating system notification permissions for Google Calendar must be enabled.
+
+## Local Scheduler
+
+Canvas assignment synchronization:
+
+```text
+Every hour at :05 America/Phoenix
+```
+
+Daily reminder preparation:
+
+```text
+Every day at 7:30 AM America/Phoenix
+```
+
+Daily reminder event:
+
+```text
+7:45 AM - 8:00 AM America/Phoenix
+```
+
+Calendar popup:
+
+```text
+At event start
+```
+
+The reminder job runs at 7:30 AM so Google Calendar has time to register the event and its popup reminder before the event starts at 7:45 AM.
+
+When the scheduler starts, it runs one immediate assignment synchronization so Google Calendar is current without waiting for the next hourly `:05` run.
+
+If the scheduler starts before 7:45 AM, it performs startup recovery for today's daily reminder. If it starts after 7:45 AM, it skips recovery because the notification window has already passed.
+
+The scheduler is local only. It is not deployed to a cloud host.
