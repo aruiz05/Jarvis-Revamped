@@ -2,22 +2,50 @@
 
 Canvas Calendar Reminder synchronizes Canvas assignments with Google Calendar and creates a daily 7:45 AM Google Calendar reminder summarizing assignments due that day.
 
-The application currently uses a private Canvas iCalendar feed to process assignments, connects to Google Calendar using OAuth 2.0, manually synchronizes current and upcoming Canvas assignments, creates a daily Google Calendar reminder event for assignments due today, can run those jobs on a local schedule while Python is running, and is configured for a Render Background Worker deployment.
+The application uses a private Canvas iCalendar feed to process assignments, connects to Google Calendar using OAuth 2.0, synchronizes current and upcoming Canvas assignments, creates a daily Google Calendar reminder event for assignments due today, and can run those jobs on a local schedule while Python is running.
 
-## Planned Technologies
+## Technology Stack
 
 - Python
-- Canvas iCalendar feed
+- Canvas iCalendar and ICS
 - Google Calendar API
-- python-dotenv
+- Google OAuth 2.0
 - APScheduler
-- Render Background Worker
+- icalendar
+- requests
+- python-dotenv
 
 ## Current Development Status
 
-Phase 10: Always-On Cloud Deployment
+Final development status: complete
 
-Phase 10 code and configuration are complete. Cloud worker deployment is pending manual Render setup.
+Current operating mode is the local APScheduler process. Render Background Worker deployment support is prepared for later, but no cloud worker is currently active.
+
+## Architecture
+
+```text
+Canvas iCalendar Feed
+        ↓
+Python application
+        ↓
+Assignment processing
+        ↓
+Google Calendar
+```
+
+```text
+APScheduler
+     ↓
+Hourly Canvas sync
+
+7:30 AM
+     ↓
+Prepare daily summary
+
+7:45 AM
+     ↓
+Google Calendar notification
+```
 
 ## Local Setup
 
@@ -53,22 +81,24 @@ ALLOW_INTERACTIVE_GOOGLE_AUTH=true
 
 The iCal URL should come from your own Canvas Calendar Feed settings. Store it only in `.env` and never commit it.
 
-Run the project:
+Start the main local scheduler:
+
+```bash
+python main.py --scheduler
+```
+
+The terminal process must remain running. The Mac must remain awake enough for Python to execute scheduled jobs.
+
+Inspect the configured schedule:
+
+```bash
+python main.py --scheduler-info
+```
+
+Run normal Canvas due today mode:
 
 ```bash
 python main.py
-```
-
-Run the Google Calendar connection test:
-
-```bash
-python main.py --calendar-test
-```
-
-Run the controlled Canvas to Google Calendar sync test:
-
-```bash
-python main.py --sync-test
 ```
 
 Preview a full manual synchronization without changing Google Calendar:
@@ -95,10 +125,24 @@ Manually create or update the due today Google Calendar reminder event:
 python main.py --sync-daily-reminder
 ```
 
-Show scheduler configuration:
+Run a read only deployment readiness check:
 
 ```bash
-python main.py --scheduler-info
+python main.py --deployment-check
+```
+
+## Development Commands
+
+Run the Google Calendar connection test:
+
+```bash
+python main.py --calendar-test
+```
+
+Run the controlled Canvas to Google Calendar sync test:
+
+```bash
+python main.py --sync-test
 ```
 
 Run one scheduled style assignment sync job:
@@ -113,25 +157,13 @@ Run one scheduled style daily reminder job:
 python main.py --run-reminder-job
 ```
 
-Start the local scheduler:
-
-```bash
-python main.py --scheduler
-```
-
 Create one notification test event a few minutes in the future:
 
 ```bash
 python main.py --notification-test
 ```
 
-Run a read only deployment readiness check:
-
-```bash
-python main.py --deployment-check
-```
-
-Expected output:
+Normal Canvas mode output looks like:
 
 ```text
 Canvas Calendar Reminder
@@ -151,7 +183,7 @@ Nothing is due today.
 
 The exact assignment counts and due items depend on your Canvas feed.
 
-The calendar test authenticates with Google Calendar, creates or reuses `token.json`, reads a small number of upcoming events from the primary calendar, creates one temporary Phase 4 test event, and deletes that exact event.
+The calendar test authenticates with Google Calendar, creates or reuses `token.json`, reads a small number of upcoming events from the primary calendar, creates one temporary test event, and deletes that exact event.
 
 The sync test retrieves Canvas assignments, selects one upcoming assignment, searches Google Calendar for an event with the same Canvas UID, and then creates updates or leaves that one event unchanged.
 
@@ -165,13 +197,15 @@ To inspect a limited sample of Canvas event structure without printing the priva
 python main.py --inspect
 ```
 
-## Current Scope
+## Scope
 
-This phase retrieves and parses Canvas iCalendar feed data, identifies assignment events, normalizes assignment deadlines, lists assignments due today, manually syncs current and upcoming Canvas assignments with duplicate prevention, previews daily reminder events, and creates duplicate safe Google Calendar reminder events.
+The project retrieves and parses Canvas iCalendar feed data, identifies assignment events, normalizes assignment deadlines, lists assignments due today, syncs current and upcoming Canvas assignments with duplicate prevention, previews daily reminder events, creates duplicate safe Google Calendar reminder events, and runs those jobs on a local schedule.
 
 The project does not delete stale Google Calendar events, add a database, add a web server, or add a frontend.
 
-When run locally, the scheduler must remain running for automatic jobs to execute. Closing the terminal, stopping Python, putting the computer into a state where the process cannot run, or shutting down the computer will stop local automation. The Render worker deployment moves that long running process off the local computer.
+When run locally, the scheduler must remain running for automatic jobs to execute. Closing the terminal, stopping Python, putting the computer into a state where the process cannot run, or shutting down the computer will stop local automation.
+
+Existing Google Calendar events remain when the local scheduler is stopped. Existing Google Calendar notifications can still occur. New Canvas changes will not sync until the scheduler runs again.
 
 ## Assignment Identification
 
@@ -363,6 +397,8 @@ Use exactly one worker instance for this personal automation. Running multiple w
 
 ## Deployment
 
+Render deployment support exists but is optional and not currently active. A Render Background Worker can later replace the locally running scheduler.
+
 The repository includes:
 
 ```text
@@ -427,3 +463,15 @@ First production verification:
 4. Confirm the 7:45 AM Google Calendar phone notification appears when something is due.
 
 After deployment, the local Mac does not need to remain on. Render runs the scheduler process.
+
+## Security
+
+Never commit:
+
+```text
+.env
+credentials.json
+token.json
+```
+
+Treat `CANVAS_ICAL_URL` as private. Do not put OAuth client secrets, access tokens, refresh tokens, or Canvas feed URLs in GitHub.

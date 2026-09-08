@@ -175,7 +175,7 @@ def main() -> None:
 
 def run_calendar_test() -> None:
     print("Canvas Calendar Reminder")
-    print("Google Calendar Phase 4 Test")
+    print("Google Calendar Connection Test")
     print()
     print("Authenticating with Google...")
 
@@ -203,7 +203,7 @@ def run_calendar_test() -> None:
         created_event_id = None
         print("Google Calendar test event deleted successfully.")
         print()
-        print("Phase 4 Google Calendar test passed.")
+        print("Google Calendar test passed.")
     except RuntimeError as error:
         print(error)
         if created_event_id:
@@ -214,7 +214,7 @@ def run_calendar_test() -> None:
 
 def run_sync_test() -> None:
     print("Canvas Calendar Reminder")
-    print("Phase 6 Canvas to Google Calendar Sync Test")
+    print("Canvas to Google Calendar Sync Test")
     print()
     print("Loading Canvas assignments...")
 
@@ -303,10 +303,10 @@ def run_sync_test() -> None:
 def run_sync_all(dry_run: bool = False) -> None:
     if dry_run:
         print("Canvas Calendar Reminder")
-        print("Phase 7 Full Sync Dry Run")
+        print("Full Sync Dry Run")
     else:
         print("Canvas Calendar Reminder")
-        print("Phase 7 Full Canvas to Google Calendar Sync")
+        print("Full Canvas to Google Calendar Sync")
     print()
     print("Loading Canvas calendar...")
     print()

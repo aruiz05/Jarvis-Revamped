@@ -22,7 +22,7 @@ from config import (
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 CREDENTIALS_FILE = GOOGLE_CREDENTIALS_PATH
 TOKEN_FILE = GOOGLE_TOKEN_PATH
-TEST_EVENT_TITLE = "Canvas Calendar Reminder - Phase 4 Test"
+TEST_EVENT_TITLE = "Canvas Calendar Reminder Calendar Test"
 NOTIFICATION_TEST_TITLE = "Canvas Calendar Reminder Notification Test"
 PRIMARY_CALENDAR_ID = "primary"
 SYNC_SOURCE = "canvas_calendar_reminder"
@@ -131,7 +131,7 @@ def create_test_event(service: Any) -> dict[str, Any]:
 
     event_body = {
         "summary": TEST_EVENT_TITLE,
-        "description": "Temporary event created by Canvas Calendar Reminder Phase 4 test",
+        "description": "Temporary event created by Canvas Calendar Reminder calendar test",
         "start": {
             "dateTime": start_time.isoformat(),
             "timeZone": TIMEZONE,
